@@ -1,5 +1,4 @@
 import os.path
-import yaml
 import datetime                   # For current Date/Time
 import paramiko                   # For remote ssh
 from math import log
@@ -18,9 +17,6 @@ def setup_config():
     #   System wide defaults
     #
     ConfigData = dict(
-
-        #   Your logfile
-        LOG= os.path.expanduser("~") + "/esxi-vm.log",
 
         #  Enable/Disable dryrun by default
         isDryRun=False,
@@ -44,14 +40,12 @@ def setup_config():
         #  Default Disk format thin, zeroedthick, eagerzeroedthick
         DISKFORMAT="thin",
 
-        #  Virtual Disk device type
-        VIRTDEV="pvscsi",
-
         #  Specify default Disk store to "LeastUsed"
         STORE="LeastUsed",
 
         #  Default Network Interface (vswitch)
         NET="None",
+        NET2="None",
 
         #  Default ISO
         ISO="None",
@@ -63,39 +57,7 @@ def setup_config():
         VMXOPTS=""
     )
 
-    ConfigDataFileLocation = os.path.expanduser("~") + "/.esxi-vm.yml"
-
-    #
-    # Get ConfigData from ConfigDataFile, then merge.
-    #
-    if os.path.exists(ConfigDataFileLocation):
-        FromFileConfigData = yaml.safe_load(open(ConfigDataFileLocation))
-        ConfigData.update(FromFileConfigData)
-
-    try:
-        with open(ConfigDataFileLocation, 'w') as FD:
-            yaml.dump(ConfigData, FD, default_flow_style=False)
-        FD.close()
-    except:
-        print "Unable to create/update config file " + ConfigDataFileLocation
-        e = sys.exc_info()[0]
-        print "The Error is " + str(e)
-        sys.exit(1)
     return ConfigData
-
-def SaveConfig(ConfigData):
-    ConfigDataFileLocation = os.path.expanduser("~") + "/.esxi-vm.yml"
-    try:
-        with open(ConfigDataFileLocation, 'w') as FD:
-            yaml.dump(ConfigData, FD, default_flow_style=False)
-        FD.close()
-    except:
-        print "Unable to create/update config file " + ConfigDataFileLocation
-        e = sys.exc_info()[0]
-        print "The Error is " + str(e)
-        return 1
-    return 0
-
 
 def theCurrDateTime():
     i = datetime.datetime.now()

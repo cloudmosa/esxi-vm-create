@@ -7,18 +7,16 @@ import os.path                    # To check if file exists
 import sys                        # For args
 import re                         # For regex
 import paramiko                   # For remote ssh
-import yaml
 import warnings
+import time
 
 from esxi_vm_functions import *
 
 #      Defaults and Variable setup
 ConfigData = setup_config()
 NAME = ""
-LOG = ConfigData['LOG']
 isDryRun = ConfigData['isDryRun']
 isVerbose = ConfigData['isVerbose']
-isSummary = ConfigData['isSummary']
 HOST = ConfigData['HOST']
 USER = ConfigData['USER']
 PASSWORD = ConfigData['PASSWORD']
@@ -26,18 +24,22 @@ CPU = ConfigData['CPU']
 MEM = ConfigData['MEM']
 HDISK = int(ConfigData['HDISK'])
 DISKFORMAT = ConfigData['DISKFORMAT']
-VIRTDEV = ConfigData['VIRTDEV']
 STORE = ConfigData['STORE']
 NET = ConfigData['NET']
+NET2 = ConfigData['NET2']
 ISO = ConfigData['ISO']
 GUESTOS = ConfigData['GUESTOS']
 VMXOPTS = ConfigData['VMXOPTS']
+ANNOTATION = ""
 
 ErrorMessages = ""
 MAC = ""
+MAC2 = ""
 GeneratedMAC = ""
+GeneratedMAC2 = ""
 ISOfound = False
 CheckHasErrors = False
+ExecuteHasErrors = False
 LeastUsedDS = ""
 DSPATH=""
 DSSTORE=""
@@ -49,23 +51,23 @@ FullPathExists = False
 parser = argparse.ArgumentParser(description='ESXi Create VM utility.')
 
 parser.add_argument('-d', '--dry', dest='isDryRunarg', action='store_true', help="Enable Dry Run mode  (" + str(isDryRun) + ")")
-parser.add_argument("-H", "--Host", dest='HOST', type=str, help="ESXi Host/IP  (" + str(HOST) + ")")
-parser.add_argument("-U", "--User", dest='USER', type=str, help="ESXi Host username  (" + str(USER) + ")")
-parser.add_argument("-P", "--Password", dest='PASSWORD', type=str, help="ESXi Host password  (*****)")
-parser.add_argument("-n", "--name", dest='NAME', type=str, help="VM name")
-parser.add_argument("-c", "--cpu", dest='CPU', type=int, help="Number of vCPUS  (" + str(CPU) + ")")
-parser.add_argument("-m", "--mem", type=int, help="Memory in GB  (" + str(MEM) + ")")
-parser.add_argument("-v", "--vdisk", dest='HDISK', type=str, help="Size of virt hdisk  (" + str(HDISK) + ")")
-parser.add_argument("-i", "--iso", dest='ISO', type=str, help="CDROM ISO Path | None  (" + str(ISO) + ")")
-parser.add_argument("-N", "--net", dest='NET', type=str, help="Network Interface | None  (" + str(NET) + ")")
-parser.add_argument("-M", "--mac", dest='MAC', type=str, help="MAC address")
-parser.add_argument("-S", "--store", dest='STORE', type=str, help="vmfs Store | LeastUsed  ("  + str(STORE) + ")")
-parser.add_argument("-g", "--guestos", dest='GUESTOS', type=str, help="Guest OS. (" + str(GUESTOS) + ")")
-parser.add_argument("-o", "--options", dest='VMXOPTS', type=str, default='NIL', help="Comma list of VMX Options.")
+parser.add_argument('-H', '--Host', dest='HOST', type=str, help="ESXi Host/IP  (" + str(HOST) + ")")
+parser.add_argument('-U', '--User', dest='USER', type=str, help="ESXi Host username  (" + str(USER) + ")")
+parser.add_argument('-P', '--Password', dest='PASSWORD', type=str, help="ESXi Host password  (*****)")
+parser.add_argument('-n', '--name', dest='NAME', type=str, help="VM name")
+parser.add_argument('-c', '--cpu', dest='CPU', type=int, help="Number of vCPUS  (" + str(CPU) + ")")
+parser.add_argument('-m', '--mem', type=int, help="Memory in GB  (" + str(MEM) + ")")
+parser.add_argument('-v', '--vdisk', dest='HDISK', type=str, help="Size of virt hdisk in GB  (" + str(HDISK) + ")")
+parser.add_argument('-i', '--iso', dest='ISO', type=str, help="CDROM ISO Path | None  (" + str(ISO) + ")")
+parser.add_argument('-N', '--net', dest='NET', type=str, help="Network Interface | None  (" + str(NET) + ")")
+parser.add_argument(      '--net2', dest='NET2', type=str, help="Second Network Interface | None  (" + str(NET) + ")")
+parser.add_argument('-M', '--mac', dest='MAC', type=str, help="MAC address")
+parser.add_argument(      '--mac2', dest='MAC2', type=str, help="Second MAC address")
+parser.add_argument('-S', '--store', dest='STORE', type=str, help="vmfs Store | LeastUsed  ("  + str(STORE) + ")")
+parser.add_argument('-g', '--guestos', dest='GUESTOS', type=str, help="Guest OS. (" + str(GUESTOS) + ")")
+parser.add_argument('-a', '--annotation', dest='ANNOTATION', type=str, help="Annotation")
+parser.add_argument('-o', '--options', dest='VMXOPTS', type=str, default='NIL', help="Comma list of VMX Options.")
 parser.add_argument('-V', '--verbose', dest='isVerbosearg', action='store_true', help="Enable Verbose mode  (" + str(isVerbose) + ")")
-parser.add_argument('--summary', dest='isSummaryarg', action='store_true', help="Display Summary  (" + str(isSummary) + ")")
-parser.add_argument("-u", "--updateDefaults", dest='UPDATE', action='store_true', help="Update Default VM settings stored in ~/.esxi-vm.yml")
-#parser.add_argument("--showDefaults", dest='SHOW', action='store_true', help="Show Default VM settings stored in ~/.esxi-vm.yml")
 
 
 args = parser.parse_args()
@@ -74,10 +76,8 @@ if args.isDryRunarg:
     isDryRun = True
 if args.isVerbosearg:
     isVerbose = True
-if args.isSummaryarg:
-    isSummary = True
 if args.HOST:
-   HOST=args.HOST
+    HOST=args.HOST
 if args.USER:
     USER=args.USER
 if args.PASSWORD:
@@ -94,50 +94,31 @@ if args.ISO:
     ISO=args.ISO
 if args.NET:
     NET=args.NET
+if args.NET2:
+    NET2=args.NET2
 if args.MAC:
     MAC=args.MAC
+if args.MAC2:
+    MAC2=args.MAC2
 if args.STORE:
     STORE=args.STORE
 if STORE == "":
     STORE = "LeastUsed"
 if args.GUESTOS:
     GUESTOS=args.GUESTOS
+if args.ANNOTATION:
+    ANNOTATION=args.ANNOTATION
 if args.VMXOPTS == '' and VMXOPTS != '':
     VMXOPTS=''
 if args.VMXOPTS and args.VMXOPTS != 'NIL':
     VMXOPTS=args.VMXOPTS.split(",")
 
-
-if args.UPDATE:
-    print "Saving new Defaults to ~/.esxi-vm.yml"
-    ConfigData['isDryRun'] = isDryRun
-    ConfigData['isVerbose'] = isVerbose
-    ConfigData['isSummary'] = isSummary
-    ConfigData['HOST'] = HOST
-    ConfigData['USER'] = USER
-    ConfigData['PASSWORD'] = PASSWORD
-    ConfigData['CPU'] = CPU
-    ConfigData['MEM'] = MEM
-    ConfigData['HDISK'] = HDISK
-    ConfigData['DISKFORMAT'] = DISKFORMAT
-    ConfigData['VIRTDEV'] = VIRTDEV
-    ConfigData['STORE'] = STORE
-    ConfigData['NET'] = NET
-    ConfigData['ISO'] = ISO
-    ConfigData['GUESTOS'] = GUESTOS
-    ConfigData['VMXOPTS'] = VMXOPTS
-    SaveConfig(ConfigData)
-    if NAME == "":
-        sys.exit(0)
-
 #
 #      main()
 #
-LogOutput = '{'
-LogOutput += '"datetime":"' + str(theCurrDateTime()) + '",'
 
 if NAME == "":
-    print "ERROR: Missing required option --name"
+    print("ERROR: Missing required option --name")
     sys.exit(1)
 
 try:
@@ -148,11 +129,11 @@ try:
     (stdin, stdout, stderr) = ssh.exec_command("esxcli system version get |grep Version")
     type(stdin)
     if re.match("Version", str(stdout.readlines())) is not None:
-        print "Unable to determine if this is a ESXi Host: %s, username: %s" % (HOST, USER)
+        print("ERROR: Unable to determine if this is a ESXi Host: %s, username: %s" % (HOST, USER))
         sys.exit(1)
 except:
-    print "The Error is " + str(sys.exc_info()[0])
-    print "Unable to access ESXi Host: %s, username: %s" % (HOST, USER)
+    print("ERROR: Unable to access ESXi Host: %s, username: %s" % (HOST, USER))
+    print(str(sys.exc_info()[0]))
     sys.exit(1)
 
 #
@@ -167,7 +148,8 @@ try:
         VOLUMES[splitLine[0]] = splitLine[1]
         LeastUsedDS = splitLine[1]
 except:
-    print "The Error is " + str(sys.exc_info()[0])
+    print("ERROR: Unable to get datastores.")
+    print(str(sys.exc_info()[0]))
     sys.exit(1)
 
 if STORE == "LeastUsed":
@@ -185,13 +167,15 @@ try:
         splitLine = re.split(',|\n', line)
         VMNICS.append(splitLine[0])
 except:
-    print "The Error is " + str(sys.exc_info()[0])
+    print("ERROR: Unable to get networks.")
+    print("The Error is " + str(sys.exc_info()[0]))
     sys.exit(1)
 
 #
 #      Check MAC address
 #
 MACarg = MAC
+MAC2arg = MAC2
 if MAC != "":
     MACregex = '^([a-fA-F0-9]{2}[:|\-]){5}[a-fA-F0-9]{2}$'
     if re.compile(MACregex).search(MAC):
@@ -200,8 +184,17 @@ if MAC != "":
     elif re.compile(MACregex).search("00:50:56:" + MAC):
         MAC="00:50:56:" + MAC.replace("-",":")
     else:
-        print "ERROR: " + MAC + " Invalid MAC address."
-        ErrorMessages += " " + MAC + " Invalid MAC address."
+        ErrorMessages += "\n" + MAC + " Invalid MAC address."
+        CheckHasErrors = True
+if MAC2 != "":
+    MACregex = '^([a-fA-F0-9]{2}[:|\-]){5}[a-fA-F0-9]{2}$'
+    if re.compile(MACregex).search(MAC2):
+        # Full MAC found. OK
+        MAC2 = MAC2.replace("-",":")
+    elif re.compile(MACregex).search("00:50:56:" + MAC2):
+        MAC2="00:50:56:" + MAC2.replace("-",":")
+    else:
+        ErrorMessages += "\n" + MAC2 + " Invalid MAC address."
         CheckHasErrors = True
 
 
@@ -219,7 +212,7 @@ if ISO != "":
             type(stdin)
             FoundISOPath = str(stdout.readlines()[0]).strip('\n')
             if isVerbose:
-                print "FoundISOPath: " + str(FoundISOPath)
+                print("FoundISOPath: " + str(FoundISOPath))
             ISO = str(FoundISOPath)
 
         (stdin, stdout, stderr) = ssh.exec_command("ls " + str(ISO))
@@ -228,7 +221,8 @@ if ISO != "":
             ISOfound = True
 
     except:
-        print "The Error is " + str(sys.exc_info()[0])
+        print("ERROR: Unable to find CDROM ISO file")
+        print(str(sys.exc_info()[0]))
         sys.exit(1)
 
 #
@@ -242,12 +236,12 @@ try:
         splitLine = line.split()
         if NAME == splitLine[1]:
             VMID = splitLine[0]
-            print "ERROR: VM " + NAME + " already exists."
-            ErrorMessages += " VM " + NAME + " already exists."
+            ErrorMessages += "\nVM " + NAME + " already exists."
             CheckHasErrors = True
 except:
-        print "The Error is " + str(sys.exc_info()[0])
-        sys.exit(1)
+    print("ERROR: Unable to get VM list")
+    print(str(sys.exc_info()[0]))
+    sys.exit(1)
 
 #
 #      Do checks here
@@ -255,20 +249,17 @@ except:
 
 #  Check CPU
 if CPU < 1 or CPU > 128:
-    print str(CPU) + " CPU out of range. [1-128]."
-    ErrorMessages += " " + str(CPU) + " CPU out of range. [1-128]."
+    ErrorMessages += "\n" + str(CPU) + " CPU out of range. [1-128]."
     CheckHasErrors = True
 
 #  Check MEM
 if MEM < 1 or MEM > 4080:
-    print str(MEM) + "GB Memory out of range. [1-4080]."
-    ErrorMessages += " " + str(MEM) + "GB Memory out of range. [1-4080]."
+    ErrorMessages += "\n" + str(MEM) + "GB Memory out of range. [1-4080]."
     CheckHasErrors = True
 
 #  Check HDISK
 if HDISK < 1 or HDISK > 63488:
-    print "Virtual Disk size " + str(HDISK) + "GB out of range. [1-63488]."
-    ErrorMessages += " Virtual Disk size " + str(HDISK) + "GB out of range. [1-63488]."
+    ErrorMessages += "\nVirtual Disk size " + str(HDISK) + "GB out of range. [1-63488]."
     CheckHasErrors = True
 
 #  Convert STORE to path and visa-versa
@@ -280,23 +271,24 @@ for Path in VOLUMES:
         DSSTORE = VOLUMES[Path]
 
 if DSSTORE not in V:
-    print "ERROR: Disk Storage " + STORE + " doesn't exist. "
-    print "    Available Disk Stores: " + str([str(item) for item in V])
-    print "    LeastUsed Disk Store : " + str(LeastUsedDS)
-    ErrorMessages += " Disk Storage " + STORE + " doesn't exist. "
+    ErrorMessages += "\nDisk Storage " + STORE + " doesn't exist."
+    ErrorMessages += " Available Disk Stores: " + str([str(item) for item in V])
+    ErrorMessages += " LeastUsed Disk Store : " + str(LeastUsedDS)
     CheckHasErrors = True
 
 #  Check NIC  (NIC record)
 if (NET not in VMNICS) and (NET != "None"):
-    print "ERROR: Virtual NIC " + NET + " doesn't exist."
-    print "    Available VM NICs: " + str([str(item) for item in VMNICS]) + " or 'None'"
-    ErrorMessages += " Virtual NIC " + NET + " doesn't exist."
+    ErrorMessages += "\nVirtual NIC " + NET + " doesn't exist."
+    ErrorMessages += " Available VM NICs: " + str([str(item) for item in VMNICS]) + " or 'None'"
+    CheckHasErrors = True
+if (NET2 not in VMNICS) and (NET2 != "None"):
+    ErrorMessages += "\nVirtual NIC " + NET2 + " doesn't exist."
+    ErrorMessages += " Available VM NICs: " + str([str(item) for item in VMNICS]) + " or 'None'"
     CheckHasErrors = True
 
 #  Check ISO exists
 if ISO != "" and not ISOfound:
-    print "ERROR: ISO " + ISO + " not found.  Use full path to ISO"
-    ErrorMessages += " ISO " + ISO + " not found.  Use full path to ISO"
+    ErrorMessages += "\nISO " + ISO + " not found.  Use full path to ISO"
     CheckHasErrors = True
 
 #  Check if DSPATH/NAME aready exists
@@ -305,39 +297,29 @@ try:
     (stdin, stdout, stderr) = ssh.exec_command("ls -d " + FullPath)
     type(stdin)
     if stdout.readlines() and not stderr.readlines():
-        print "ERROR: Directory " + FullPath + " already exists."
-        ErrorMessages += " Directory " + FullPath + " already exists."
+        ErrorMessages += "\nVM Directory " + FullPath + " already exists."
         CheckHasErrors = True
 except:
     pass
+
+##
+if CheckHasErrors:
+    print('ERROR: Parameter has error' + ErrorMessages)
+    sys.exit(1)
+
+if isDryRun:
+    print('OK: No error was found for dry run.')
+    sys.exit(0)
 
 #
 #      Create the VM
 #
 VMX = []
+VMX.append('.encoding = "UTF-8"')
 VMX.append('config.version = "8"')
-VMX.append('virtualHW.version = "8"')
-VMX.append('vmci0.present = "TRUE"')
-VMX.append('displayName = "' + NAME + '"')
-VMX.append('floppy0.present = "FALSE"')
-VMX.append('numvcpus = "' + str(CPU) + '"')
-VMX.append('scsi0.present = "TRUE"')
-VMX.append('scsi0.sharedBus = "none"')
-VMX.append('scsi0.virtualDev = "pvscsi"')
-VMX.append('memsize = "' + str(MEM * 1024) + '"')
-VMX.append('scsi0:0.present = "TRUE"')
-VMX.append('scsi0:0.fileName = "' + NAME + '.vmdk"')
-VMX.append('scsi0:0.deviceType = "scsi-hardDisk"')
-if ISO == "":
-    VMX.append('ide1:0.present = "TRUE"')
-    VMX.append('ide1:0.fileName = "emptyBackingString"')
-    VMX.append('ide1:0.deviceType = "atapi-cdrom"')
-    VMX.append('ide1:0.startConnected = "FALSE"')
-    VMX.append('ide1:0.clientDevice = "TRUE"')
-else:
-    VMX.append('ide1:0.present = "TRUE"')
-    VMX.append('ide1:0.fileName = "' + ISO + '"')
-    VMX.append('ide1:0.deviceType = "cdrom-image"')
+VMX.append('virtualHW.version = "19"')
+VMX.append('nvram = "' + NAME + '.nvram"')
+VMX.append('svga.present = "TRUE"')
 VMX.append('pciBridge0.present = "TRUE"')
 VMX.append('pciBridge4.present = "TRUE"')
 VMX.append('pciBridge4.virtualDev = "pcieRootPort"')
@@ -351,16 +333,109 @@ VMX.append('pciBridge6.functions = "8"')
 VMX.append('pciBridge7.present = "TRUE"')
 VMX.append('pciBridge7.virtualDev = "pcieRootPort"')
 VMX.append('pciBridge7.functions = "8"')
-VMX.append('guestOS = "' + GUESTOS + '"')
+VMX.append('vmci0.present = "TRUE"')
+VMX.append('hpet0.present = "TRUE"')
+VMX.append('floppy0.present = "FALSE"')
+VMX.append('RemoteDisplay.maxConnections = "-1"')
+VMX.append('numvcpus = "' + str(CPU) + '"');
+VMX.append('memSize = "' + str(MEM * 1024) + '"')
+VMX.append('bios.bootRetry.delay = "10"')
+VMX.append('firmware = "efi"')
+VMX.append('powerType.powerOff = "default"')
+VMX.append('powerType.suspend = "soft"')
+VMX.append('powerType.reset = "default"')
+VMX.append('tools.upgrade.policy = "manual"')
+VMX.append('sched.cpu.units = "mhz"')
+VMX.append('sched.cpu.affinity = "all"')
+VMX.append('sched.cpu.latencySensitivity = "normal"')
+VMX.append('vm.createDate = "' + str(int(time.time())) + '"')
+VMX.append('scsi0.virtualDev = "lsilogic"')
+VMX.append('scsi0.present = "TRUE"')
+VMX.append('sata0.present = "TRUE"')
+VMX.append('usb.present = "TRUE"')
+VMX.append('ehci.present = "TRUE"')
+VMX.append('svga.autodetect = "TRUE"')
+VMX.append('scsi0:0.deviceType = "scsi-hardDisk"')
+VMX.append('scsi0:0.fileName = "' + NAME + '.vmdk"')
+VMX.append('sched.scsi0:0.shares = "normal"')
+VMX.append('sched.scsi0:0.throughputCap = "off"')
+VMX.append('scsi0:0.present = "TRUE"')
+
 if NET != "None":
-    VMX.append('ethernet0.virtualDev = "vmxnet3"')
-    VMX.append('ethernet0.present = "TRUE"')
     VMX.append('ethernet0.networkName = "' + NET + '"')
     if MAC == "":
         VMX.append('ethernet0.addressType = "generated"')
     else:
         VMX.append('ethernet0.addressType = "static"')
         VMX.append('ethernet0.address = "' + MAC + '"')
+    VMX.append('ethernet0.wakeOnPcktRcv = "FALSE"')
+    VMX.append('ethernet0.uptCompatibility = "TRUE"')
+    VMX.append('ethernet0.present = "TRUE"')
+    VMX.append('ethernet0.pciSlotNumber = "160"')
+
+    if NET2 != "None":
+        VMX.append('ethernet1.networkName = "' + NET2 + '"')
+        if MAC == "":
+            VMX.append('ethernet1.addressType = "generated"')
+        else:
+            VMX.append('ethernet1.addressType = "static"')
+            VMX.append('ethernet1.address = "' + MAC2 + '"')
+        VMX.append('ethernet1.wakeOnPcktRcv = "FALSE"')
+        VMX.append('ethernet1.uptCompatibility = "TRUE"')
+        VMX.append('ethernet1.present = "TRUE"')
+        VMX.append('ethernet1.pciSlotNumber = "192"')
+
+VMX.append('displayName = "' + NAME + '"')
+VMX.append('guestOS = "' + GUESTOS + '"')
+
+VMX.append('toolScripts.afterPowerOn = "TRUE"')
+VMX.append('toolScripts.afterResume = "TRUE"')
+VMX.append('toolScripts.beforeSuspend = "TRUE"')
+VMX.append('toolScripts.beforePowerOff = "TRUE"')
+VMX.append('tools.syncTime = "FALSE"')
+VMX.append('sched.cpu.min = "0"')
+VMX.append('sched.cpu.shares = "normal"')
+VMX.append('sched.mem.min = "0"')
+VMX.append('sched.mem.minSize = "0"')
+VMX.append('sched.mem.shares = "normal"')
+VMX.append('numa.autosize.cookie = "80012"')
+VMX.append('numa.autosize.vcpu.maxPerVirtualNode = "8"')
+VMX.append('scsi0:0.redo = ""')
+VMX.append('pciBridge0.pciSlotNumber = "17"')
+VMX.append('pciBridge4.pciSlotNumber = "21"')
+VMX.append('pciBridge5.pciSlotNumber = "22"')
+VMX.append('pciBridge6.pciSlotNumber = "23"')
+VMX.append('pciBridge7.pciSlotNumber = "24"')
+VMX.append('scsi0.pciSlotNumber = "16"')
+VMX.append('usb.pciSlotNumber = "32"')
+VMX.append('ehci.pciSlotNumber = "33"')
+VMX.append('sata0.pciSlotNumber = "34"')
+VMX.append('svga.vramSize = "16777216"')
+VMX.append('vmotion.checkpointFBSize = "16777216"')
+VMX.append('vmotion.checkpointSVGAPrimarySize = "16777216"')
+VMX.append('vmotion.svga.mobMaxSize = "16777216"')
+VMX.append('vmotion.svga.graphicsMemoryKB = "16384"')
+VMX.append('vmci0.id = "134664824"')
+VMX.append('monitor.phys_bits_used = "45"')
+VMX.append('cleanShutdown = "FALSE"')
+VMX.append('softPowerOff = "FALSE"')
+VMX.append('usb:0.present = "TRUE"')
+VMX.append('usb:0.deviceType = "hid"')
+VMX.append('usb:0.port = "0"')
+VMX.append('usb:0.parent = "-1"')
+VMX.append('usb:1.speed = "2"')
+VMX.append('usb:1.present = "TRUE"')
+VMX.append('usb:1.deviceType = "hub"')
+VMX.append('usb:1.port = "1"')
+VMX.append('usb:1.parent = "-1"')
+
+if ISO != "":
+    VMX.append('ide1:0.present = "TRUE"')
+    VMX.append('ide1:0.fileName = "' + ISO + '"')
+    VMX.append('ide1:0.deviceType = "cdrom-image"')
+
+if ANNOTATION != "":
+    VMX.append('annotation = "' + ANNOTATION + '"')
 
 #
 #   Merge extra VMX options
@@ -386,125 +461,92 @@ for VMXopt in VMXOPTS:
             VMX.append(key + " = " + value)
 
 if isVerbose and VMXOPTS != '':
-    print "VMX file:"
+    print("VMX file:")
     for i in VMX:
-        print i
+        print(i)
 
 MyVM = FullPath + "/" + NAME
-if CheckHasErrors:
-    Result = "Errors"
-else:
-    Result = "Success"
 
-if not isDryRun and not CheckHasErrors:
-    try:
-
-        # Create NAME.vmx
-        if isVerbose:
-            print "Create " + NAME + ".vmx file"
-        (stdin, stdout, stderr) = ssh.exec_command("mkdir " + FullPath )
-        type(stdin)
-        for line in VMX:
-            (stdin, stdout, stderr) = ssh.exec_command("echo " + line + " >>" + MyVM + ".vmx")
-            type(stdin)
-
-        # Create vmdk
-        if isVerbose:
-            print "Create " + NAME + ".vmdk file"
-        (stdin, stdout, stderr) = ssh.exec_command("vmkfstools -c " + str(HDISK) + "G -d " + DISKFORMAT + " " + MyVM + ".vmdk")
-        type(stdin)
-
-        # Register VM
-        if isVerbose:
-            print "Register VM"
-        (stdin, stdout, stderr) = ssh.exec_command("vim-cmd solo/registervm " + MyVM + ".vmx")
-        type(stdin)
-        VMID = int(stdout.readlines()[0])
-
-        # Power on VM
-        if isVerbose:
-            print "Power ON VM"
-        (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.on " + str(VMID))
-        type(stdin)
-        if stderr.readlines():
-            print "Error Power.on VM."
-            Result="Fail"
-
-        # Get Generated MAC
-        if NET != "None":
-            (stdin, stdout, stderr) = ssh.exec_command(
-                "grep -i 'ethernet0.*ddress = ' " + MyVM + ".vmx |tail -1|awk '{print $NF}'")
-            type(stdin)
-            GeneratedMAC = str(stdout.readlines()[0]).strip('\n"')
-
-    except:
-        print "There was an error creating the VM."
-        ErrorMessages += " There was an error creating the VM."
-        Result = "Fail"
-
-#      Print Summary
-
-#
-#   The output log string
-LogOutput += '"Host":"' + HOST + '",'
-LogOutput += '"Name":"' + NAME + '",'
-LogOutput += '"CPU":"' + str(CPU) + '",'
-LogOutput += '"Mem":"' + str(MEM) + '",'
-LogOutput += '"Hdisk":"' + str(HDISK) + '",'
-LogOutput += '"DiskFormat":"' + DISKFORMAT + '",'
-LogOutput += '"Virtual Device":"' + VIRTDEV + '",'
-LogOutput += '"Store":"' + STORE + '",'
-LogOutput += '"Store Used":"' + DSPATH + '",'
-LogOutput += '"Network":"' + NET + '",'
-LogOutput += '"ISO":"' + ISOarg + '",'
-LogOutput += '"ISO used":"' + ISO + '",'
-LogOutput += '"Guest OS":"' + GUESTOS + '",'
-LogOutput += '"MAC":"' + MACarg + '",'
-LogOutput += '"MAC Used":"' + GeneratedMAC + '",'
-LogOutput += '"Dry Run":"' + str(isDryRun) + '",'
-LogOutput += '"Verbose":"' + str(isVerbose) + '",'
-if ErrorMessages != "":
-    LogOutput += '"Error Message":"' + ErrorMessages + '",'
-LogOutput += '"Result":"' + Result + '",'
-LogOutput += '"Completion Time":"' + str(theCurrDateTime()) + '"'
-LogOutput += '}\n'
 try:
-    with open(LOG, "a+w") as FD:
-        FD.write(LogOutput)
+    # Create NAME.vmx
+    if isVerbose:
+        print("Create " + NAME + ".vmx file")
+    (stdin, stdout, stderr) = ssh.exec_command("mkdir " + FullPath )
+    type(stdin)
+    for line in VMX:
+        (stdin, stdout, stderr) = ssh.exec_command("echo '" + line + "' >>" + MyVM + ".vmx")
+        type(stdin)
+
+    # Create vmdk
+    if isVerbose:
+        print("Create " + NAME + ".vmdk file")
+    (stdin, stdout, stderr) = ssh.exec_command("vmkfstools -c " + str(HDISK) + "G -d " + DISKFORMAT + " " + MyVM + ".vmdk")
+    type(stdin)
+
+    # Register VM
+    if isVerbose:
+        print("Register VM")
+    (stdin, stdout, stderr) = ssh.exec_command("vim-cmd solo/registervm " + MyVM + ".vmx")
+    type(stdin)
+    try:
+        VMID = int(stdout.readlines()[0])
+    except:
+        print("ERROR: Register VM failed.")
+        print(stdout.readlines())
+        sys.exit(1)
+
+    # Power on VM
+    if isVerbose:
+        print("Power ON VM")
+    (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.on " + str(VMID))
+    type(stdin)
+    if stderr.readlines():
+        print("ERROR: Power on VM failed.")
+        print(stderr.readlines())
+        sys.exit(1)
+
 except:
-    print "Error writing to log file: " + LOG
-
-if isSummary:
-    if isDryRun:
-        print "\nDry Run summary:"
-    else:
-        print "\nCreate VM Success:"
-
-    if isVerbose:
-        print "ESXi Host: " + HOST
-    print "VM NAME: " + NAME
-    print "vCPU: " + str(CPU)
-    print "Memory: " + str(MEM) + "GB"
-    print "VM Disk: " + str(HDISK) + "GB"
-    if isVerbose:
-        print "Format: " + DISKFORMAT
-    print "DS Store: " + DSSTORE
-    print "Network: " + NET
-    if ISO:
-        print "ISO: " + ISO
-    if isVerbose:
-        print "Guest OS: " + GUESTOS
-        print "MAC: " + GeneratedMAC
-else:
-    pass
-
-if CheckHasErrors:
-    if isDryRun:
-        print "Dry Run: Failed."
+    print("ERROR: Unexpected error during creating the VM.")
+    print(stdout)
+    print(stderr)
     sys.exit(1)
-else:
-    if isDryRun:
-        print "Dry Run: Success."
-    else:
-        print GeneratedMAC
-    sys.exit(0)
+
+# Get generated MAC
+try:
+    if NET != "None":
+        (stdin, stdout, stderr) = ssh.exec_command(
+            "grep -i 'ethernet0.*ddress = ' " + MyVM + ".vmx |tail -1|awk '{print $NF}'")
+        type(stdin)
+        GeneratedMAC = str(stdout.readlines()[0]).strip('\n"')
+        if NET2 != "None":
+            (stdin, stdout, stderr) = ssh.exec_command(
+                "grep -i 'ethernet1.*ddress = ' " + MyVM + ".vmx |tail -1|awk '{print $NF}'")
+            type(stdin)
+            GeneratedMAC2 = str(stdout.readlines()[0]).strip('\n"')
+except:
+    print("WARNING: Fail to get generated MAC address.")
+
+# Print Summary
+
+print("OK")
+print("ESXi Host: " + HOST)
+print("VM NAME: " + NAME)
+print("vCPU: " + str(CPU))
+print("Memory: " + str(MEM) + "GB")
+print("Disk: " + str(HDISK) + "GB")
+print("Disk: Format: " + DISKFORMAT)
+print("Datastore: " + DSSTORE)
+print("Network: " + NET)
+print("MAC: " + GeneratedMAC)
+if NET2 != "None":
+    print("Network2: " + NET2)
+    print("MAC2: " + GeneratedMAC2)
+if ISO:
+    print("ISO: " + ISO)
+print("Guest OS: " + GUESTOS)
+print("ANNOTATION: " + AANOTATION)
+
+stdin.close()
+
+sys.exit(0)
+
