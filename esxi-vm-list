@@ -1,0 +1,87 @@
+#!/usr/bin/python
+
+
+import argparse                   # Argument parser
+import datetime                   # For current Date/Time
+import time
+import os.path                    # To check if file exists
+import sys                        # For args
+import re                         # For regex
+import paramiko                   # For remote ssh
+import warnings
+
+from esxi_vm_functions import *
+
+#      Defaults and Variable setup
+ConfigData = setup_config()
+NAME = ""
+isDryRun = ConfigData['isDryRun']
+isVerbose = ConfigData['isVerbose']
+HOST = ConfigData['HOST']
+USER = ConfigData['USER']
+PASSWORD = ConfigData['PASSWORD']
+CPU = ConfigData['CPU']
+MEM = ConfigData['MEM']
+HDISK = int(ConfigData['HDISK'])
+DISKFORMAT = ConfigData['DISKFORMAT']
+STORE = ConfigData['STORE']
+NET = ConfigData['NET']
+ISO = ConfigData['ISO']
+GUESTOS = ConfigData['GUESTOS']
+
+POWEROFF = False
+POWERON = False
+
+#
+#      Process Arguments
+#
+parser = argparse.ArgumentParser(description='ESXi Create VM utility.')
+
+parser.add_argument('-H', '--Host', dest='HOST', type=str, help="ESXi Host/IP  (" + str(HOST) + ")")
+parser.add_argument('-U', '--User', dest='USER', type=str, help="ESXi Host username  (" + str(USER) + ")")
+parser.add_argument('-P', '--Password', dest='PASSWORD', type=str, help="ESXi Host password  (*****)")
+
+args = parser.parse_args()
+
+if args.HOST:
+    HOST=args.HOST
+if args.USER:
+    USER=args.USER
+if args.PASSWORD:
+    PASSWORD=args.PASSWORD
+
+#
+#      main()
+#
+
+try:
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(HOST, username=USER, password=PASSWORD)
+
+    (stdin, stdout, stderr) = ssh.exec_command("esxcli system version get |grep Version")
+    type(stdin)
+    if re.match("Version", str(stdout.readlines())) is not None:
+        print("ERROR: Unable to determine if this is a ESXi Host: %s, username: %s" % (HOST, USER))
+        sys.exit(1)
+except:
+    print("ERROR: Unable to access ESXi Host: %s, username: %s" % (HOST, USER))
+    print(str(sys.exc_info()[0]))
+    sys.exit(1)
+
+
+# List VMs
+try:
+    (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/getallvms")
+    type(stdin)
+    for line in stdout.readlines():
+        print(line, end="")
+
+except:
+    print("ERROR: Unable to get VM list.")
+    print(str(sys.exc_info()[0]))
+    sys.exit(1)
+
+stdin.close()
+sys.exit(0)
+

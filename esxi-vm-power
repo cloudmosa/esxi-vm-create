@@ -1,0 +1,195 @@
+#!/usr/bin/python
+
+
+import argparse                   # Argument parser
+import datetime                   # For current Date/Time
+import time
+import os.path                    # To check if file exists
+import sys                        # For args
+import re                         # For regex
+import paramiko                   # For remote ssh
+import warnings
+
+from esxi_vm_functions import *
+
+#      Defaults and Variable setup
+ConfigData = setup_config()
+NAME = ""
+isDryRun = ConfigData['isDryRun']
+isVerbose = ConfigData['isVerbose']
+HOST = ConfigData['HOST']
+USER = ConfigData['USER']
+PASSWORD = ConfigData['PASSWORD']
+CPU = ConfigData['CPU']
+MEM = ConfigData['MEM']
+HDISK = int(ConfigData['HDISK'])
+DISKFORMAT = ConfigData['DISKFORMAT']
+STORE = ConfigData['STORE']
+NET = ConfigData['NET']
+ISO = ConfigData['ISO']
+GUESTOS = ConfigData['GUESTOS']
+
+POWEROFF = False
+POWERON = False
+
+#
+#      Process Arguments
+#
+parser = argparse.ArgumentParser(description='ESXi Create VM utility.')
+
+parser.add_argument('-H', '--Host', dest='HOST', type=str, help="ESXi Host/IP  (" + str(HOST) + ")")
+parser.add_argument('-U', '--User', dest='USER', type=str, help="ESXi Host username  (" + str(USER) + ")")
+parser.add_argument('-P', '--Password', dest='PASSWORD', type=str, help="ESXi Host password  (*****)")
+parser.add_argument('-n', '--name', dest='NAME', type=str, help="VM name")
+parser.add_argument(      '--on', dest='ON', action='store_true', help='Power on VM')
+parser.add_argument(      '--off', dest='OFF', action='store_true', help='Power off VM')
+parser.add_argument(      '--reset', dest='RESET', action='store_true', help='Power reset VM')
+parser.add_argument('-V', '--verbose', dest='isVerbosearg', action='store_true', help="Enable Verbose mode  (" + str(isVerbose) + ")")
+
+args = parser.parse_args()
+
+if args.isVerbosearg:
+    isVerbose = True
+if args.HOST:
+    HOST=args.HOST
+if args.USER:
+    USER=args.USER
+if args.PASSWORD:
+    PASSWORD=args.PASSWORD
+if args.NAME:
+    NAME=args.NAME
+if args.ON:
+    POWERON = True
+if args.OFF:
+    POWEROFF = True
+if args.RESET:
+    POWEROFF = True
+    POWERON = True
+
+#
+#      main()
+#
+
+if NAME == "":
+    print("ERROR: Missing required option --name")
+    sys.exit(1)
+
+try:
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(HOST, username=USER, password=PASSWORD)
+
+    (stdin, stdout, stderr) = ssh.exec_command("esxcli system version get |grep Version")
+    type(stdin)
+    if re.match("Version", str(stdout.readlines())) is not None:
+        print("ERROR: Unable to determine if this is a ESXi Host: %s, username: %s" % (HOST, USER))
+        sys.exit(1)
+except:
+    print("ERROR: Unable to access ESXi Host: %s, username: %s" % (HOST, USER))
+    print(str(sys.exc_info()[0]))
+    sys.exit(1)
+
+#
+#      Check if VM exists
+#
+VMID = -1
+try:
+    (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/getallvms")
+    type(stdin)
+    for line in stdout.readlines():
+        splitLine = line.split()
+        if NAME == splitLine[1]:
+            VMID = splitLine[0]
+            JNK = line.split('[')[1]
+            STORE = JNK.split(']')[0]
+            VMDIR = splitLine[3]
+
+    if VMID == -1:
+        print("ERROR: VM " + NAME + " doesn't exists.")
+        sys.exit(1)
+except:
+    print("ERROR: Unable to get VM list.")
+    print(str(sys.exc_info()[0]))
+    sys.exit(1)
+
+if POWEROFF:
+    try:
+        CurrentState = ""
+        CurrentStateCounter = 0
+        while CurrentState != "off":
+            if isVerbose:
+                print("Get state VM")
+            (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.getstate " + str(VMID))
+            type(stdin)
+            lines = str(stdout.readlines()) + str(stderr.readlines())
+            if isVerbose:
+                print("power.getstate: " + lines)
+            if re.search("Powered off", lines):
+                CurrentState = "off"
+
+            # Power off VM
+            if isVerbose:
+                print("Power OFF VM")
+            (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.off " + str(VMID) + " ||echo")
+            type(stdin)
+            lines = str(stdout.readlines()) + str(stderr.readlines())
+            if isVerbose:
+                print("power.off: " + str(lines))
+
+            CurrentStateCounter += 1
+            if CurrentStateCounter >10:
+                break
+            time.sleep(1)
+
+    except:
+        print("ERROR: Unexpected error during power off the VM.")
+        sys.exit(1)
+
+    if CurrentState != "off":
+        print("ERROR: Fail to power off VM.")
+        sys.exit(1)
+
+if POWERON:
+    try:
+        CurrentState = ""
+        CurrentStateCounter = 0
+        while CurrentState != "on":
+            if isVerbose:
+                print("Get state VM")
+            (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.getstate " + str(VMID))
+            type(stdin)
+            lines = str(stdout.readlines()) + str(stderr.readlines())
+            if isVerbose:
+                print("power.getstate: " + lines)
+            if re.search("Powered on", lines):
+                CurrentState = "on"
+
+            # Power off VM
+            if isVerbose:
+                print("Power ON VM")
+            (stdin, stdout, stderr) = ssh.exec_command("vim-cmd vmsvc/power.on " + str(VMID) + " ||echo")
+            type(stdin)
+            lines = str(stdout.readlines()) + str(stderr.readlines())
+            if isVerbose:
+                print("power.on: " + str(lines))
+
+            CurrentStateCounter += 1
+            if CurrentStateCounter >10:
+                break
+            time.sleep(1)
+
+    except:
+        print("ERROR: Unexpected error during power on the VM.")
+        sys.exit(1)
+
+    if CurrentState != "on":
+        print("ERROR: Fail to power on VM.")
+        sys.exit(1)
+
+print("OK")
+print("ESXi Host: " + HOST)
+print("VM NAME: " + NAME)
+
+stdin.close()
+sys.exit(0)
+
