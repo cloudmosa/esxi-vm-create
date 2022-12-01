@@ -18,7 +18,7 @@ Usage
 
   Some basic sanity checks are done on the ESXi host before creating the VM.  The --verbose (-V) option will give you a little more details in the creation process.  If an invalid Disk Stores or Network Interface is specified, the available devices will be shown in the error message. The tool will not show the list of available ISO images, and Guest OS types.  CPU, Memory, Virtual Disk sizes are based on ESXi 6.0 limitations.
 
-  The --dry (-d) option will go through the sanity checks, but will not create the VM.  
+  The --dry (-d) option will go through the sanity checks, but will not create the VM.
 
   By default the Disk Store is set to "LeastUsed".  This will use the Disk Store with the most free space (in bytes).
 
@@ -44,6 +44,12 @@ Requirements
 yum -y install python python-paramiko
 ```
 
+or
+
+```
+pip install --upgrade paramiko
+```
+
 
 Command Line Args
 -----------------
@@ -53,8 +59,8 @@ Command Line Args
 
 usage: esxi-vm-create [-h] [-d] [-H HOST] [-U USER] [-P PASSWORD] [-n NAME]
                       [-c CPU] [-m MEM] [-v HDISK] [-i ISO] [-N NET] [-M MAC]
-                      [-S STORE] [-g GUESTOS] [-o VMXOPTS] [-V] [--summary]
-                      [-u]
+                      [--net2 NET2] [--mac2 MAC2] [-a ANNOTATION]
+                      [-S STORE] [-g GUESTOS] [-o VMXOPTS] [-V]
 
 ESXi Create VM utility.
 
@@ -73,59 +79,33 @@ optional arguments:
   -i ISO, --iso ISO     CDROM ISO Path | None (None)
   -N NET, --net NET     Network Interface | None (None)
   -M MAC, --mac MAC     MAC address
+          --net2 NET    Secondary Network Interface | None (None)
+          --mac2 MAC    Secondary MAC address
+
   -S STORE, --store STORE
                         vmfs Store | LeastUsed (LeastUsed)
   -g GUESTOS, --guestos GUESTOS
                         Guest OS. (centos-64)
+  -a TEXT, --annotation TEXT    Annotation
   -o VMXOPTS, --options VMXOPTS
                         Comma list of VMX Options.
   -V, --verbose         Enable Verbose mode (False)
-  --summary             Display Summary (False)
-  -u, --updateDefaults  Update Default VM settings stored in ~/.esxi-vm.yml
 ```
 
 
 Example Usage
 -------------
 
-  Running the script for the first time it's recommended to specify your defaults.  (ESXi HOST, PASSWORD)
-
-```
-./esxi-vm-create -H esxi -P MySecurePassword -u
-Saving new Defaults to ~/.esxi-vm.yml
-```
-
-
-  Create a new VM named testvm01 using all defaults from ~/.esxi-vm.yml.
-```
-./esxi-vm-create -n testvm01 --summary
-
-Create VM Success:
-VM NAME: testvm01
-vCPU: 2
-Memory: 4GB
-VM Disk: 20GB
-DS Store: DS_4TB
-Network: None
-
-```
-
-  Change default number of vCPUs to 4, Memory to 8GB and vDisk size to 40GB.
-```
-./esxi-vm-create -c 4 -m 8 -s 40 -u
-Saving new Defaults to ~/.esxi-vm.yml
-```
-
   Create a new VM named testvm02 using new defaults from ~/.esxi-vm.yml and specifying a Network interface and partial MAC.
+
 ```
-./esxi-vm-create -n testvm02 -N 192.168.1 -M 01:02:03
-00:50:56:01:02:03
+./esxi-vm-create -H esxi-host -n testvm02 -N 192.168.1.112 -M 00:50:56:01:02:03
 ```
 
   Available Network Interfaces and Available Disk Storage volumes will be listed if an invalid option is specified.
 
 ```
-./esxi-vm-create -n testvm03 -N BadNet -S BadDS
+./esxi-vm-create -H esxi-host -n testvm03 -N BadNet -S BadDS
 ERROR: Disk Storage BadDS doesn't exist.
     Available Disk Stores: ['DS_SSD500s', 'DS_SSD500c', 'DS_SSD250', 'DS_4TB', 'DS_3TB_m']
     LeastUsed Disk Store : DS_4TB
@@ -133,10 +113,10 @@ ERROR: Virtual NIC BadNet doesn't exist.
     Available VM NICs: ['192.168.1', '192.168.0', 'VM Network test'] or 'None'
 ```
 
-  Create a new VM named testvm03 using a valid Network Interface, valid Disk Storage volume, summary and verbose enabled.  Save as default.  
+  Create a new VM named testvm03 using a valid Network Interface, valid Disk Storage volume, summary and verbose enabled.
+
 ```
-./esxi-vm-create -n testvm03 -N 192.168.1 -S DS_3TB_m --summary --verbose --updateDefaults
-Saving new Defaults to ~/.esxi-vm.yml
+./esxi-vm-create -H esxi-host -n testvm03 -N 192.168.1 -S DS_3TB_m --verbose
 Create testvm03.vmx file
 Create testvm03.vmdk file
 Register VM
@@ -150,15 +130,15 @@ Memory: 8GB
 VM Disk: 40GB
 Format: thin
 DS Store: DS_3TB_m
-Network: 192.168.1
+Network: 192.168.1.112
 Guest OS: centos-64
 MAC: 00:0c:29:32:63:92
-00:0c:29:32:63:92
 ```
 
-  Create a new VM named testvm04 specifying an ISO file to boot.  
+  Create a new VM named testvm04 specifying an ISO file to boot.
+
 ```
-./esxi-vm-create -n testvm04 --summary --iso CentOS-7-x86_64-Minimal-1611.iso
+./esxi-vm-create -H esxi-host -n testvm04 --summary --iso CentOS-7-x86_64-Minimal-1611.iso
 FoundISOPath: /vmfs/volumes/5430094d-5a4fa180-4962-0017a45127e2/ISO/CentOS-7-x86_64-Minimal-1611.iso
 Create testvm04.vmx file
 Create testvm04.vmdk file
@@ -173,18 +153,23 @@ Memory: 8GB
 VM Disk: 40GB
 Format: thin
 DS Store: DS_3TB_m
-Network: 192.168.1
+Network: 192.168.1.112
 ISO: /vmfs/volumes/5430094d-5a4fa180-4962-0017a45127e2/ISO/CentOS-7-x86_64-Minimal-1611.iso
 Guest OS: centos-64
 MAC: 00:0c:29:ea:a0:42
-00:0c:29:ea:a0:42
 
 ```
 
-  Merge/Add extra VMX options, saved as default.
+  Stop and destroy existing VM named testvm04.
+
 ```
-./esxi-vm-create -o 'floppy0.present  = "TRUE",svga.autodetect = "TRUE",svga.present = "TRUE"' -u
-Saving new Defaults to ~/.esxi-vm.yml
+./esxi-vm-destroy -H esxi-host -n testvm04
+```
+
+  Power off and power on VM named testvm04.
+
+```
+./esxi-vm-power -H esxi-host -n testvm04 --reset
 ```
 
 License
